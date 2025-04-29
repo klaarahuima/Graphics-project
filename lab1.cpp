@@ -76,12 +76,7 @@ class Object {
  */
 class Sphere {
 public:
-    //Sphere(const Vector& C, double R, Vector alb, bool mirror, bool transparent) : C(C), R(R), alb(alb), mirror(mirror), transparent(transparent) {};
-    Sphere(const Vector& C, double R, Vector alb, bool mirror, bool transparent) : C(C), R(R) {
-                this->alb = alb;
-                this->mirror = mirror;
-                this->transparent = transparent;
-            }
+    Sphere(const Vector& C, double R, Vector alb, bool mirror, bool transparent) : C(C), R(R), alb(alb), mirror(mirror), transparent(transparent) {};
     Vector C; // center
     double R; // radius
     Vector alb; // albedo, color property
@@ -90,13 +85,7 @@ public:
     
     bool intersect(const Ray& r, Vector &P, Vector &N, double &t) { // P : point of intersection, N : normal vector (reflected ray)
         // determines whether the ray intersects with the sphere and updates P and N with relevant info
-        //double delta = sqr(dot(r.u, r.O - C)) - ((r.O - C).norm2() - R * R); // definition in lecture slides
-        Vector OC = r.O - C;
-        double a = dot(r.u, r.u);           
-        double b = 2 * dot(OC, r.u);
-        double c = dot(OC, OC) - R * R;
-
-        double delta = b * b - 4 * a * c;
+        double delta = sqr(dot(r.u, r.O - C)) - ((r.O - C).norm2() - R * R); // definition in lecture slides
         
         if (delta < 0) {
             return false;
@@ -104,16 +93,22 @@ public:
         double x = dot(r.u, C - r.O);
         double t1 = x - sqrt(delta);
         double t2 = x + sqrt(delta);
-        if (t2 < 0) {return false;} // sphere is behind the ray
+        if (t2 < 0) {
+            return false;
+        } // sphere is behind the ray
         if (t1 >= 0) { // if t1 negative then ray starts from in the middle of the sphere (direction negative)
             t = t1;
-        } else {t = t2;}
+        } else {
+            t = t2;
+        }
         P = r.O + t * r.u; // extend ray from origin to surface of sphere (multiply unit vector by t)
         N = P - C; // directional vector from point of contact to center of sphere, gives normal
         N.normalize();
         return true;
         }
+
         return (delta >=0);
+    }
     /*bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
         Vector OC = r.O - C;
         double b = dot(r.u, OC);
@@ -136,7 +131,6 @@ public:
         N.normalize();
         return true;
     }*/
-    }
 };
 
  
@@ -148,18 +142,19 @@ class Scene {
         Vector L; // light source point coordinates
         double I;
 
-        bool intersect(const Ray& r, Vector& P, Vector& N, double& t, int& id) {
-            t = 1e30;
+        bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Sphere& hit_obj) {
+            t = 1E30;
             bool intersected = false;
             Vector localP, localN;
             double localt;
+
             for (int i = 0; i < objects.size(); i++) {
                 if (objects[i].intersect(r, localP, localN, localt)) {
                     if (localt < t) {
                         t = localt;
                         P = localP;
                         N = localN;
-                        id = i;
+                        hit_obj = objects[i];
                         intersected = true;
                     }
                 }
@@ -173,19 +168,19 @@ class Scene {
 
             Vector P,N;
             double t;
-            int object_id;
+            Sphere hit_obj(Vector(0,0,0), 0, Vector(0,0,0), false, false);
 
-            if (!intersect(r, P, N, t, object_id)) {
+            if (!intersect(r, P, N, t, hit_obj)) {
                 return Vector(0, 0, 0);
             }
 
-            if(objects[object_id].mirror) {
+            if(hit_obj.mirror) {
                 Vector reflection_dir = r.u - 2*dot(r.u, N)*N;
                 Ray mirrorR(P + 0.001*N, reflection_dir);
                 return getColor(mirrorR, bounce_number - 1);
             }
 
-            if(objects[object_id].transparent) {
+            if(hit_obj.transparent) {
                 double n1 = 1;
                 double n2 = 1.4;
                 Vector Nt = N;
@@ -212,31 +207,15 @@ class Scene {
                 Vector ray_dir = t_n_coeff * Nt + t_Tangent;
                 ray_dir.normalize();
                 Ray refraction(P-0.001*Nt, ray_dir);
-                return getColor(refraction, bounce_number -1);
+                return getColor(refraction, bounce_number - 1);
             }
 
             Vector lightDir = L - P;
             double d2 = lightDir.norm2();
             lightDir.normalize();
-
-            Vector shadowP, shadowN;
-            int shadow_id;
-            double shadow_t;
-
-            Ray shadow_ray(P + 0.001*N, lightDir);
-            bool shadow = false;
-            if(intersect(shadow_ray, shadowP, shadowN, shadow_t, shadow_id)){
-                
-                if((shadowP - P).norm2() < d2){
-                    shadow = true;
-                }
-            }
-            if (!shadow) {
-            Vector color = I/(4 * M_PI * d2) * objects[object_id].alb / M_PI * std::max(0., dot(lightDir, N));
+            
+            Vector color = I/(4 * M_PI * d2) * hit_obj.alb / M_PI * std::max(0., dot(lightDir, N));
             return color;
-            }
-    
-            return Vector(0,0,0);
         }
 
         /* Vector getColor(const Ray& r, int bounce) {
@@ -378,24 +357,35 @@ int main() {
     Vector camera_origin(0, 0, 55); //camera placement
     double fov = 60 * M_PI / 180; //field of view
             
-    Scene scene;
-    scene.L = Vector(-10,20,40);
-    scene.I = 2E10;
-    Sphere s(Vector(0,0,-10), 2, Vector(1,0,0), false, false); // Big red ball
-    scene.add(s);
+    Scene this_scene;
+    this_scene.L = Vector(-10,20,40);
+    this_scene.I = 1e10;
+    Sphere S(Vector(20,0,0), 10, Vector(1,1,1), true, false);
+    this_scene.add(S);
+    Sphere k(Vector(0,0,0), 10, Vector(0.4,0.7,0.2), false, false);
+    this_scene.add(k);
+    //Sphere h(Vector(-20,0,0), 10, Vector(1,0.2,0.8), false, false);
+    //this_scene.add(h);
 
     //TriangleMesh mesh;
     //scene.add(&mesh);
 
-    scene.add(Sphere(Vector(0,-1000,0), 990, Vector(1, 0, 0), false, false)); // bottom
-    scene.add(Sphere(Vector(0,1000,0), 980, Vector(0.2, 0.5, 0.9), false, false)); // top
-    scene.add(Sphere(Vector(0,0,1000), 980, Vector(0.4, 0.8, 0.7), false, false)); // back, covers all other balls or doesnt appear at all
-    scene.add(Sphere(Vector(1000,0,0), 980, Vector(0.9, 0.2, 0.9), false, false)); //left and right
-    scene.add(Sphere(Vector(-1000,0,0), 980, Vector(0.6, 0.5, 0.1), false, false)); // left and right
+    Sphere left(Vector(-1000, 0, 0), 940, Vector(0.5, 0.8, 0.1), false, false);
+    Sphere right(Vector(1000, 0, 0), 940, Vector(0.9, 0.2, 0.3), false, false);
+    Sphere top(Vector(0, 1000, 0), 940, Vector(0.3, 0.5, 0.3), false, false);
+    Sphere bottom(Vector(0, -1000, 0), 990, Vector(0.6, 0.5, 0.7), false, false);
+    Sphere front(Vector(0, 0, -1000), 940, Vector(0.1, 0.6, 0.17), false, false);
+    Sphere backwall(Vector(0, 0, 1000), 940, Vector(0.8, 0.2, 0.9), false, false);
 
+    this_scene.add(left);
+    this_scene.add(right);
+    this_scene.add(top);
+    this_scene.add(bottom);
+    this_scene.add(front);
+    this_scene.add(backwall);
 
     std::vector<unsigned char> image(W * H * 3, 0);
-    int bounce_number = 5;
+    int bounce_number = 6;
 
     // iterating through every pixel (i,j)
     for (int i = 0; i < H; i++) {
@@ -406,46 +396,18 @@ int main() {
             Vector r_dir(j - W/2 + 0.5, -i + 0.5 + H/2, d); // ray directions
             r_dir.normalize(); // normalize ray
             Ray r(camera_origin, r_dir); // ray for this pixel specifically
-            Vector color = scene.getColor(r, bounce_number);
+            Vector color = this_scene.getColor(r, bounce_number);
 
             
-            //image[(i * W + j) * 3 + 0] =(std::max(0., std::min(255., std::pow(color[0], 1/2.2))));
-            //image[(i * W + j) * 3 + 1] = (std::max(0., std::min(255., std::pow(color[1], 1/2.2))));
-            //image[(i * W + j) * 3 + 2] =(std::max(0., std::min(255., std::pow(color[2], 1/2.2))));
+            image[(i * W + j) * 3 + 0] =(std::max(0., std::min(255., std::pow(color[0], 1/2.2))));
+            image[(i * W + j) * 3 + 1] = (std::max(0., std::min(255., std::pow(color[1], 1/2.2))));
+            image[(i * W + j) * 3 + 2] =(std::max(0., std::min(255., std::pow(color[2], 1/2.2))));
 
-            //image[(i * W + j) * 3 + 0] = std::pow(color[0], 1/2.2);
-            //image[(i * W + j) * 3 + 1] = std::pow(color[1], 1/2.2);
-            //image[(i * W + j) * 3 + 2] = std::pow(color[2], 1/2.2);
-            
-            //image[(i * W + j) * 3 + 0] = to_byte(color[0]);
-            //image[(i * W + j) * 3 + 1] = to_byte(color[1]);
-            //image[(i * W + j) * 3 + 2] = to_byte(color[2]);
-            
-
-            /*image[(i * W + j) * 3 + 0] = std::min(255., color[0]);
-            image[(i * W + j) * 3 + 1] = std::min(255., color[1]);
-            image[(i * W + j) * 3 + 2] = std::min(255., color[2]);
-                */
-            /*
-            image[3 * (i * W + j) + 0] = 255 * std::pow(color[0], 1/2.2);
-            image[3 * (i * W + j) + 1] = 255 * std::pow(color[1], 1/2.2);
-            image[3 * (i * W + j) + 2] = 255 * std::pow(color[2], 1/2.2);
-           */
-            image[(i * W + j) * 3 + 0] = std::min(255., pow(color[0], 0.44));
-            image[(i * W + j) * 3 + 1] = std::min(255., pow(color[1], 0.44));
-            image[(i * W + j) * 3 + 2] = std::min(255., pow(color[2], 0.44));
-           /*Vector P, N;
-            double t;
-            if (S.intersect(r, P, N, t)) {
-                image[(i * W + j) * 3 + 0] = (255.);
-                image[(i * W + j) * 3 + 1] = (255.);
-                image[(i * W + j) * 3 + 2] = (255.); }
-            }*/
-
-
-        
+            //image[(i * W + j) * 3 + 0] = std::min(255., pow(color[0], 0.44));
+            //image[(i * W + j) * 3 + 1] = std::min(255., pow(color[1], 0.44));
+            //image[(i * W + j) * 3 + 2] = std::min(255., pow(color[2], 0.44));
         }
-            
+
         }
     stbi_write_png("lab_image.png", W, H, 3, &image[0], 0);
  
