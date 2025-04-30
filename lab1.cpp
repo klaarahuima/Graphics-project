@@ -141,6 +141,7 @@ class Scene {
         void add(const Sphere& s){objects.push_back(s);}
         Vector L; // light source point coordinates
         double I;
+        Sphere empty_sphere = Sphere(Vector(0,0,0), 0, Vector(0,0,0), false, false);
 
         bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Sphere& hit_obj) {
             t = 1E30;
@@ -215,62 +216,23 @@ class Scene {
             lightDir.normalize();
             
             Vector color = I/(4 * M_PI * d2) * hit_obj.alb / M_PI * std::max(0., dot(lightDir, N));
-            return color;
-        }
 
-        /* Vector getColor(const Ray& r, int bounce) {
-            if (bounce <= 0) return Vector(0, 0, 0);
-    
-            Vector P, N;
-            double t;
-            int id;
-            if (!intersect(r, P, N, t, id)) return Vector(0, 0, 0);
-    
-            Object* obj = objects[id];
-    
-            if (obj->mirror) {
-                Vector reflected_dir = r.u - 2*dot(r.u, N)*N;
-                Ray reflected_ray(P + 0.001*N, reflected_dir);
-                return getColor(reflected_ray, bounce - 1);
+            //check for shadow
+            Ray shadow_ray(P + 0.0001*N, lightDir);
+            double shadowt;
+            Vector shadowP, shadowN;
+            bool in_shadow = intersect(shadow_ray, shadowP, shadowN, shadowt, empty_sphere);
+            bool condition = ((shadowP - P).norm2() <= d2);
+            bool both = (in_shadow && condition);
+            
+             if (!both) {
+                return color;
             }
-    
-            if (obj->transparent) {
-                double n1 = 1, n2 = 1.4;
-                Vector N_transp = N;
-                if (dot(r.u, N) > 0) {
-                    std::swap(n1, n2);
-                    N_transp = -1*N_transp;
-                }
-                Vector T_tangent = (n1/n2)*(r.u - dot(r.u, N_transp)*N_transp);
-                double rad = 1 - sqr(n1/n2)*(1-sqr(dot(r.u, N_transp)));
-                if (rad < 0) {
-                    Vector reflected_dir = r.u - 2*dot(r.u, N)*N;
-                    Ray reflected_ray(P - 0.001*N, reflected_dir);
-                    return getColor(reflected_ray, bounce-1);
-                }
-                Vector T_normal = -sqrt(rad)*N_transp;
-                Ray refracted_ray(P - N_transp*0.001, T_tangent+T_normal);
-                return getColor(refracted_ray, bounce-1);
+            else {
+                return Vector(0, 0, 0);
             }
-
-        Vector light_dir = L - P;
-        double d2 = light_dir.norm2();
-        light_dir.normalize();
-
-        // Shadow
-        Ray shadow_ray(P + 0.001*N, light_dir);
-        Vector shadowP, shadowN;
-        double shadowt;
-        int shadow_id;
-        bool in_shadow = intersect(shadow_ray, shadowP, shadowN, shadowt, shadow_id) && (shadowP - P).norm2() < d2;
-
-        if (!in_shadow) {
-            return (I / (4 * M_PI * d2)) * (obj->alb / M_PI * std::max(dot(N, light_dir), 0.0));
         }
-        else {
-            return Vector(0, 0, 0);
-        }
-    }*/
+
 };
 // stuff lecturer did:
 // put get color as a function of the scene
