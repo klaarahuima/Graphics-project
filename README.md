@@ -1,3 +1,2 @@
 # Graphics-project
-Raytracer
-Klaara Huima
+Raytracer, Klaara Huima
