@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdio.h>
 #include <algorithm>
+#include <list>
  
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -14,7 +15,7 @@
 #include "stb_image.h"
 
 static std::default_random_engine engine (10) ; // random seed = 10
-static std::uniform_real_distribution<double> uniform (0,1) ;
+static std::uniform_real_distribution<double> uniform (0,1);
 
 double sqr(double x) { return x*x;};
 
@@ -73,6 +74,15 @@ double dot(const Vector& a, const Vector& b) {
 Vector cross(const Vector& a, const Vector& b) {
     return Vector(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
 }
+
+// BVH functions
+
+int get_longest(const Vector& diag) {
+    if (diag[0] > diag[1] && diag[0] > diag[2]) return 0;
+    if (diag[1] > diag[2]) return 1;
+    return 2;
+}
+
 
 Vector random_lightDir(Vector& N) {
 
@@ -149,6 +159,7 @@ class Sphere : public Geometry {
     }
 };
 
+
 class BoundingBox { // this is supposed to speed it up
     public:
     BoundingBox(const Vector& min = Vector(0,0,0), const Vector & max = Vector(0,0,0)) : min(min), max(max) {};
@@ -177,8 +188,21 @@ class BoundingBox { // this is supposed to speed it up
         }
         return false;
     }
+
+    Vector diag() {
+        return max - min;
+    }
+
     Vector min, max;
 };
+
+class BVHNode{
+    public:
+        BoundingBox bounding_box;
+        BVHNode* left = nullptr;
+        BVHNode* right = nullptr;
+        int start, end;
+    };
 
 class TriangleIndices {
     public:
@@ -189,6 +213,7 @@ class TriangleIndices {
         int ni, nj, nk;  // indices within the normals array
         int group;       // face group
 };
+
      
 class TriangleMesh : public Geometry {
     public:
@@ -382,58 +407,102 @@ class TriangleMesh : public Geometry {
 
             bool intersection = false;
 
+            if (!root->bounding_box.intersect(r)) {
+                return false;
+            }
+
             if (!this->bounding_box.intersect(r)) {
                 return false;
             }
 
-            for (int i = 0; i < indices.size(); i++ ) {
-
-                // Getting vertex coordinates
-                Vector& A = vertices[indices[i].vtxi];
-                Vector& B = vertices[indices[i].vtxj];
-                Vector& C = vertices[indices[i].vtxk];
-
-                // Solving intersection equation
-                Vector e1 = B - A;
-                Vector e2 = C - A;
-                Vector z(0,0,0);
-                Vector M = cross(e1, e2);
-                Vector AO = A - r.O;
-
-                double det = dot(r.u, M);
-                if (std::abs(det) < 1e-6) continue;
-
-                double beta = dot(e2, cross(AO, r.u)) / dot(r.u, M);
-                double gamma = -dot(e1, cross(AO, r.u)) / dot(r.u, M);
-                double alpha = 1 - beta - gamma;
-                double localt = dot(AO, M) / dot(r.u, M);
-
-                if (localt >= 0 && localt < t  && beta>=0 && beta <= 1 && alpha>=0 && alpha <= 1 && gamma>=0 && gamma <= 1) {
-                    P = A + beta*e1 + gamma*e2;
-					t = localt;
-                    if (smooth) {
-                        // Getting average of normals
-					    N = alpha*normals[indices[i].ni] + beta*normals[indices[i].nj] + gamma*normals[indices[i].nk];
-                    } else {
-                        N = M;
+            std::list<BVHNode*> node_list;
+            node_list.push_front(root);
+            while(!node_list.empty()) {
+                BVHNode* current = node_list.back();
+                node_list.pop_back();
+                if(current->left) {
+                    if(current->left->bounding_box.intersect(r)) {
+                        node_list.push_back(current->left);
                     }
-					N.normalize();
-                    intersection = true;
+                    if(current->right->bounding_box.intersect(r)) {
+                        node_list.push_back(current->right);
+                    }
+                } else {
+                for (int i = current->start; i < current->end; i++ ) {
+                    // Getting vertex coordinates
+                    Vector& A = vertices[indices[i].vtxi];
+                    Vector& B = vertices[indices[i].vtxj];
+                    Vector& C = vertices[indices[i].vtxk];
+
+                    // Solving intersection equation
+                    Vector e1 = B - A;
+                    Vector e2 = C - A;
+                    Vector z(0,0,0);
+                    Vector M = cross(e1, e2);
+                    Vector AO = A - r.O;
+
+                    double det = dot(r.u, M);
+                    if (std::abs(det) < 1e-6) continue;
+
+                    double beta = dot(e2, cross(AO, r.u)) / dot(r.u, M);
+                    double gamma = -dot(e1, cross(AO, r.u)) / dot(r.u, M);
+                    double alpha = 1 - beta - gamma;
+                    double localt = dot(AO, M) / dot(r.u, M);
+
+                    if (localt >= 0 && localt < t  && beta>=0 && beta <= 1 && alpha>=0 && alpha <= 1 && gamma>=0 && gamma <= 1) {
+                        P = A + beta*e1 + gamma*e2;
+                        t = localt;
+                        if (smooth) {
+                            // Getting average of normals
+                            N = alpha*normals[indices[i].ni] + beta*normals[indices[i].nj] + gamma*normals[indices[i].nk];
+                        } else {
+                            N = M;
+                        }
+                        N.normalize();
+                        intersection = true;
+                    }
                 }
             }
+                }
             return intersection;
+        }       
+
+        Vector compute_barycenter(const TriangleIndices& triangle) {
+            Vector v0 = vertices[triangle.vtxi];
+            Vector v1 = vertices[triangle.vtxj];
+            Vector v2 = vertices[triangle.vtxk];
+            return (v0 + v1 + v2) / 3.0;
         }
 
         void compute_bbox() {
             bounding_box.min = Vector(1E9, 1E9, 1E9); // Progressively try to improve these bounds (min and max)
             bounding_box.max = Vector(-1E9,-1E9, -1E9);
-
-            for (int i = 0; i < vertices.size(); i++) {
-                for (int j = 0; j < 3; j++) {
-                    bounding_box.min[j] = std::min(bounding_box.min[j], vertices[i][j]);
-                    bounding_box.max[j] = std::max(bounding_box.max[j], vertices[i][j]);
+                for (int i = 0; i < vertices.size(); i++) {
+                    for (int j = 0; j < 3; j++) {
+                        bounding_box.min[j] = std::min(bounding_box.min[j], vertices[i][j]);
+                        bounding_box.max[j] = std::max(bounding_box.max[j], vertices[i][j]);
+                    }
                 }
-            }
+        }
+
+        BoundingBox bvh_bbox(int start, int end) {
+            BoundingBox bounding_box;
+            bounding_box.min = Vector(1E9, 1E9, 1E9); // Progressively try to improve these bounds (min and max)
+            bounding_box.max = Vector(-1E9,-1E9, -1E9);
+                for (int i = start; i < end; i++) {
+                    TriangleIndices& triangle = indices[i];
+                    Vector x = vertices[triangle.vtxi];
+                    Vector y = vertices[triangle.vtxj];
+                    Vector z = vertices[triangle.vtxk];
+
+                    for (const Vector& vec : {x, y, z}) {
+                        for (int j = 0; j < 3; j++) {
+                            bounding_box.min[j] = std::min(bounding_box.min[j], vec[j]);
+                            bounding_box.max[j] = std::max(bounding_box.max[j], vec[j]);
+                        }
+                    }
+                }
+            return bounding_box;
         }
 
         void no_bbox() {
@@ -441,12 +510,46 @@ class TriangleMesh : public Geometry {
             bounding_box.max = Vector(-1E9,-1E9, -1E9);
         }
 
+        void BVHtree(BVHNode* node, int start, int end) {
+
+            node->start = start;
+            node->end = end;
+            node->bounding_box = bvh_bbox(start, end);
+
+            Vector diag = node->bounding_box.diag();
+            Vector middle_diag = node->bounding_box.min + diag * 0.5;
+
+            int longest = get_longest(diag);
+            int pivot_index = start;
+
+            for(int i = start; i < end; i ++) {
+                Vector barycenter = compute_barycenter(indices[i]);
+                if (barycenter[longest] < middle_diag[longest]) {
+                    std::swap(indices[i], indices[pivot_index]);
+                    pivot_index = pivot_index + 1;
+                }
+            }
+
+            if (pivot_index <= start || pivot_index >= end-1 || end-start < 5) {
+                node->left = nullptr;
+                node->right = nullptr;
+                return;
+            }
+
+            node->left = new BVHNode();
+            node->right = new BVHNode();
+            BVHtree(node->left, start, pivot_index);
+            BVHtree(node->right, pivot_index, end);
+
+        }
         std::vector<TriangleIndices> indices;
         std::vector<Vector> vertices;
         std::vector<Vector> normals;
         std::vector<Vector> uvs;
         std::vector<Vector> vertexcolors;
         BoundingBox bounding_box;
+        BVHNode* root = new BVHNode;
+
 };
 
  
@@ -458,7 +561,6 @@ class Scene {
         Vector L; // light source point coordinates
         double I;
         bool direct_lighting;
-        int ray_count;
         bool antialiasing;
 
         bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Geometry*& hit_obj) {
@@ -551,14 +653,20 @@ class Scene {
                 color = Vector(0,0,0);
             }
 
-            if (!direct_lighting) {
+            if (!direct_lighting && (bounce_number==5)) {
+                Vector indirect(0,0,0);
+                // Adding random indirect light rays
+                int n = 256;
+                for (int i = 0; i < n; i++) {
+                    Vector random_dir = random_lightDir(N);
+                    random_dir.normalize();
+                    Ray bounce_ray = Ray(P + 0.0001*random_dir, random_dir);
+                    Vector new_color = hit_obj->alb * getColor(bounce_ray, bounce_number-1);
+                    indirect = indirect + new_color;
+                    }     
+                    
+                color = color + indirect/n;
 
-                // Adding a random indirect light ray
-                Vector random_dir = random_lightDir(N);
-                random_dir.normalize();
-                Ray bounce_ray = Ray(P + 0.0001*random_dir, random_dir);
-                Vector new_color = hit_obj->alb * getColor(bounce_ray, bounce_number-1);
-                color = (color + new_color) / 2;
             }
 
             return color;
@@ -585,25 +693,29 @@ int main() {
             
     Scene this_scene;
 
+    //this_scene.objects.push_back(new Sphere(Vector(0,0,0), 10, Vector(0.8,0.8,0.8), false, false));
     //this_scene.objects.push_back(new Sphere(Vector(20,0,0), 10, Vector(1,1,1), false, true));
+    //this_scene.objects.push_back(new Sphere(Vector(-20,0,0), 10, Vector(1,1,1), true, false));
+
+
     //Sphere k(Vector(0,0,0), 10, Vector(0.4,0.7,0.2), false, false);
     //this_scene.add(k);
     //Sphere h(Vector(-20,0,0), 10, Vector(1,0.2,0.8), false, false);
     //this_scene.add(h);
 
     // Adding walls and floor/ceiling
-    this_scene.objects.push_back(new Sphere(Vector(-1000, 0, 0), 940, Vector(0.5, 0.8, 0.1), false, false));
-    this_scene.objects.push_back(new Sphere(Vector(1000, 0, 0), 940, Vector(0.9, 0.2, 0.3), false, false));
-    this_scene.objects.push_back(new Sphere(Vector(0, 1000, 0), 940, Vector(0.3, 0.5, 0.3), false, false));
-    this_scene.objects.push_back(new Sphere(Vector(0, -1000, 0), 990, Vector(0.6, 0.5, 0.7), false, false));
-    this_scene.objects.push_back(new Sphere(Vector(0, 0, -1000), 940, Vector(0.1, 0.6, 0.17), false, false));
-    this_scene.objects.push_back(new Sphere(Vector(0, 0, 1000), 940, Vector(0.8, 0.2, 0.9), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(-1000, 0, 0), 940, Vector(0.9, 0.2, 0.9), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(1000, 0, 0), 940, Vector(0.9, 0.4, 0.3), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, 1000, 0), 940, Vector(0.2, 0.5, 0.9), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, -1000, 0), 990, Vector(0.3, 0.4, 0.7), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, 0, -1000), 940, Vector(0.4, 0.8, 0.7), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, 0, 1000), 940, Vector(0.6, 0.5, 0.1), false, false));
     
     // Adding cat mesh to scene
     TriangleMesh* mesh = new TriangleMesh();
 	mesh->readOBJ("cat.obj");
 	mesh->alb = Vector(1,1,1);
-    mesh->mirror = false;
+    mesh->mirror = true;
     mesh->smooth = true;
     mesh->transparent = false;
 
@@ -612,15 +724,20 @@ int main() {
     mesh->scale(0.6, Vector(0,-10,0));
     mesh->compute_bbox();
 
+    //BVH
+    mesh->BVHtree(mesh->root, 0, mesh->indices.size());
+    mesh->bvh_bbox(0, mesh->indices.size());
+
+
     this_scene.objects.push_back(mesh);
 
 
     // Defining scene lighting
     this_scene.L = Vector(-10,20,40);
-    this_scene.I = 8e10;
+    this_scene.I = 1e10;
     this_scene.direct_lighting = false;
-    bool antialiasing = true;
-    int alias_rays = 16;
+    bool antialiasing = false;
+    int alias_rays = 5;
     int bounce_number = 5;
 
     std::vector<unsigned char> image(W * H * 3, 0);
@@ -636,7 +753,7 @@ int main() {
             r_dir.normalize(); // normalize ray
             Ray r(camera_origin, r_dir); // ray for this pixel specifically
 
-            Vector color = this_scene.getColor(r, bounce_number);           
+            Vector color = this_scene.getColor(r, bounce_number);          
 
             if (antialiasing) {
                 color = Vector(0,0,0);
@@ -650,7 +767,7 @@ int main() {
                     Vector random_color = this_scene.getColor(muller_ray, bounce_number);
                     color = color + random_color;
                 }
-                color = color / (this_scene.ray_count);
+                color = color / (alias_rays);
             }
             
             image[(i * W + j) * 3 + 0] =(std::max(0., std::min(255., std::pow(color.data[0], 1/2.2))));
