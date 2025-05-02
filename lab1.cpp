@@ -104,22 +104,24 @@ public:
     Vector O,u;
 
 };
-/*
-class Object {
-    public:
-    virtual bool intersect(const Ray& r, Vector& P, Vector& N, double& t) = 0;
-};
- */
-class Sphere {
+
+class Geometry {
 public:
-    Sphere(const Vector& C, double R, Vector alb, bool mirror, bool transparent) : C(C), R(R), alb(alb), mirror(mirror), transparent(transparent) {};
+    Geometry(const Vector& alb, bool mirror, bool transparent) : alb(alb),transparent(transparent), mirror(mirror) {};
+    Vector alb;
+    bool mirror, transparent;
+    virtual bool intersect(const Ray& r, Vector &P, Vector &N, double &t) = 0;
+
+};
+
+class Sphere : public Geometry {
+    public:
+    Sphere(const Vector& C, double R, const Vector& alb, bool mirror = false, bool transparent = false)
+    : Geometry(alb, mirror, transparent), C(C), R(R) {}
     Vector C; // center
     double R; // radius
-    Vector alb; // albedo, color property
-    bool mirror;
-    bool transparent;
     
-    bool intersect(const Ray& r, Vector &P, Vector &N, double &t) { // P : point of intersection, N : normal vector (reflected ray)
+    virtual bool intersect(const Ray& r, Vector &P, Vector &N, double &t) override { // P : point of intersection, N : normal vector (reflected ray)
         // determines whether the ray intersects with the sphere and updates P and N with relevant info
         double delta = sqr(dot(r.u, r.O - C)) - ((r.O - C).norm2() - R * R); // definition in lecture slides
         
@@ -147,155 +149,6 @@ public:
     }
 };
 
- 
-class Scene {
-    public:
-        Scene() {};
-        std::vector<Sphere> objects;
-        void add(const Sphere& s){objects.push_back(s);}
-        Vector L; // light source point coordinates
-        double I;
-        Sphere empty_sphere = Sphere(Vector(0,0,0), 0, Vector(0,0,0), false, false);
-        bool direct_lighting;
-        int ray_count;
-        bool antialiasing;
-
-        bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Sphere& hit_obj) {
-            t = 1E30;
-            bool intersected = false;
-            Vector localP, localN;
-            double localt;
-
-            for (int i = 0; i < objects.size(); i++) {
-                if (objects[i].intersect(r, localP, localN, localt)) {
-                    if (localt < t) {
-                        t = localt;
-                        P = localP;
-                        N = localN;
-                        hit_obj = objects[i];
-                        intersected = true;
-                    }
-                }
-            }
-            return intersected;
-        }
-
-        Vector getColor(const Ray &r, int bounce_number) {
-
-            if (bounce_number <= 0) return Vector(0,0,0);
-
-            Vector P,N;
-            double t;
-            Sphere hit_obj = empty_sphere;
-            
-            if (!intersect(r, P, N, t, hit_obj)) {
-                return Vector(0, 0, 0);
-            }
-
-            if(hit_obj.mirror) {
-                Vector reflection_dir = r.u - 2*dot(r.u, N)*N;
-                Ray mirrorR(P + 0.001*N, reflection_dir);
-                return getColor(mirrorR, bounce_number - 1);
-            }
-
-            if(hit_obj.transparent) {
-                double n1 = 1;
-                double n2 = 1.4;
-                Vector Nt = N;
-                double t_n_coeff;
-                Vector t_Tangent;
-
-                if (dot(r.u, N)>0) {
-                    std::swap(n1,n2);
-                    Nt = -1* Nt;
-                }
-
-                t_Tangent = n1 / n2 * (r.u - dot(r.u, Nt) * Nt);
-                //t_n_coeff = 1 - sqrt(1 - sqr(n1/n2) * ( 1- sqr(dot(r.u, Nt))));
-                double rad = 1 - sqr(n1/n2)* (1-sqr(dot(r.u, Nt)));
-
-                if (rad < 0) {
-                    Vector ref_dir = r.u - 2*dot(r.u, N)*N;
-                    ref_dir.normalize();
-                    Ray mirrorR = Ray(P + 0.001*N, ref_dir);
-                    return getColor(mirrorR, bounce_number-1);
-                }
-
-                t_n_coeff = -sqrt(rad);
-                Vector ray_dir = t_n_coeff * Nt + t_Tangent;
-                ray_dir.normalize();
-                Ray refraction(P-0.001*Nt, ray_dir);
-                return getColor(refraction, bounce_number - 1);
-            }
-
-            Vector lightDir = L - P;
-            double d2 = lightDir.norm2();
-            lightDir.normalize();
-            
-            Vector color = I/(4 * M_PI * d2) * hit_obj.alb / M_PI * std::max(0., dot(lightDir, N));
-
-            //check for shadow
-            Ray shadow_ray(P + 0.001*N, lightDir);
-            double shadowt;
-            Vector shadowP, shadowN;
-            bool in_shadow = intersect(shadow_ray, shadowP, shadowN, shadowt, empty_sphere);
-            bool condition = ((shadowP - P).norm2() <= d2);
-            bool both = (in_shadow && condition);
-            if (both) {
-                color = Vector(0,0,0);
-            }
-
-            if (bounce_number == 0) {
-                return color;
-            }
-
-            if (!direct_lighting) {
-
-                Vector random_dir = random_lightDir(N);
-                random_dir.normalize();
-                Ray bounce_ray = Ray(P + 0.0001*random_dir, random_dir);
-                Vector new_color = hit_obj.alb * getColor(bounce_ray, bounce_number-1);
-                color = color + new_color;
-            }
-
-            return color;
-            }
-
-};
-/*
-class BoundingBox { // this is supposed to speed it up
-    public:
-    BoundingBox(const Vector& m = Vector(0,0,0), const Vector & M = Vector(0,0,0)) : m(m), M(M) {};
-
-    bool intersect(const Ray& r) { // checks if theres an intersection with a ray and the bounding box
-        // check this in some intersect function
-
-        double tx1 = (m[0] - r.O[0]/r.u[0]);
-        double tx2 = (M[0] - r.O[0]/r.u[0]);
-        double txMin = std::min(tx1, tx2);
-        double txMax = std::max(tx1, tx2);
-
-        double ty1 = (m[1] - r.O[1]/r.u[1]);
-        double ty2 = (M[1] - r.O[1]/r.u[1]);
-        double tyMin = std::min(ty1, ty2);
-        double tyMax = std::max(ty1, ty2);
-
-        double tz1 = (m[2] - r.O[2]/r.u[2]);
-        double tz2 = (M[2] - r.O[2]/r.u[2]);
-        double tzMin = std::min(tz1, tz2);
-        double tzMax = std::max(tz1, tz2);
-
-        //intersect if
-        if (std::min(txMax, std::min(tyMax, tzMax)) > std::max(txMin, std::max(tyMin, tzMin))) {
-            return true;
-        }
-        return false;
-
-
-    }
-    Vector m, M; //min and max
-};
-*/
 class TriangleIndices {
     public:
         TriangleIndices(int vtxi = -1, int vtxj = -1, int vtxk = -1, int ni = -1, int nj = -1, int nk = -1, int uvi = -1, int uvj = -1, int uvk = -1, int group = -1, bool added = false) : vtxi(vtxi), vtxj(vtxj), vtxk(vtxk), uvi(uvi), uvj(uvj), uvk(uvk), ni(ni), nj(nj), nk(nk), group(group) {
@@ -306,10 +159,11 @@ class TriangleIndices {
         int group;       // face group
 };
      
-class TriangleMesh {
+class TriangleMesh : public Geometry {
     public:
-      ~TriangleMesh() {}
-        TriangleMesh() {};
+        ~TriangleMesh() {};
+        TriangleMesh() : Geometry(alb, mirror, transparent), smooth(smooth) {};
+        bool smooth = true;
 
         void readOBJ(const char* obj) {
      
@@ -484,12 +338,220 @@ class TriangleMesh {
             fclose(f);
      
         }
+
+        void scale(double scale, const Vector& transpose) {
+            for (int i = 0; i < vertices.size(); i++) {
+                vertices[i][0] = vertices[i][0]*scale + transpose[0];
+		        vertices[i][1] = vertices[i][1]*scale + transpose[1];
+		        vertices[i][2] = vertices[i][2]*scale + transpose[2];
+            }
+        }
+
+        virtual bool intersect(const Ray& r, Vector &P, Vector &N, double &t) override {
+
+            bool intersection = false;
+
+            for (int i = 0; i < indices.size(); i++ ) {
+
+                // Getting vertex coordinates
+                Vector& A = vertices[indices[i].vtxi];
+                Vector& B = vertices[indices[i].vtxj];
+                Vector& C = vertices[indices[i].vtxk];
+
+                // Solving intersection equation
+                Vector e1 = B - A;
+                Vector e2 = C - A;
+                Vector z(0,0,0);
+                Vector M = cross(e1, e2);
+                Vector AO = A - r.O;
+
+                double det = dot(r.u, M);
+                if (std::abs(det) < 1e-6) continue;
+
+                double beta = dot(e2, cross(AO, r.u)) / dot(r.u, M);
+                double gamma = -dot(e1, cross(AO, r.u)) / dot(r.u, M);
+                double alpha = 1 - beta - gamma;
+                double localt = dot(AO, M) / dot(r.u, M);
+
+                if (localt >= 0 && localt < t  && beta>=0 && beta <= 1 && alpha>=0 && alpha <= 1 && gamma>=0 && gamma <= 1) {
+                    P = A + beta*e1 + gamma*e2;
+					t = localt;
+                    if (smooth) {
+                        // Getting average of normals
+					    N = alpha*normals[indices[i].ni] + beta*normals[indices[i].nj] + gamma*normals[indices[i].nk];
+                    } else {
+                        N = M;
+                    }
+					N.normalize();
+                    intersection = true;
+                }
+            }
+            return intersection;
+        }
         std::vector<TriangleIndices> indices;
         std::vector<Vector> vertices;
         std::vector<Vector> normals;
         std::vector<Vector> uvs;
         std::vector<Vector> vertexcolors;
-    };
+};
+
+ 
+class Scene {
+    public:
+        Scene() {};
+
+        std::vector<Geometry*> objects;
+        Vector L; // light source point coordinates
+        double I;
+        bool direct_lighting;
+        int ray_count;
+        bool antialiasing;
+
+        bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Geometry*& hit_obj) {
+            t = 1E30;
+            bool intersected = false;
+            Vector localP, localN;
+            double localt;
+
+            for (int i = 0; i < objects.size(); i++) {
+                if (objects[i]->intersect(r, localP, localN, localt)) {
+                    if (localt < t) {
+                        t = localt;
+                        P = localP;
+                        N = localN;
+                        hit_obj = objects[i];
+
+                        intersected = true;
+                    }
+                }
+            }
+            return intersected;
+        }
+
+        Vector getColor(const Ray &r, int bounce_number) {
+
+            if (bounce_number <= 0) return Vector(0,0,0);
+
+            Vector P,N;
+            double t;
+            Geometry *hit_obj = nullptr;
+            
+            if (!intersect(r, P, N, t, hit_obj)) {
+                return Vector(0, 0, 0);
+            }
+
+            if(hit_obj->mirror) {
+
+                // Handling mirror surfaces
+                Vector reflection_dir = r.u - 2*dot(r.u, N)*N;
+                Ray mirrorR(P + 0.001*N, reflection_dir);
+                return getColor(mirrorR, bounce_number - 1);
+            }
+
+            if(hit_obj->transparent) {
+
+                // Handling transparent surfaces without Fresnel's law
+                double n1 = 1;
+                double n2 = 1.4;
+                Vector Nt = N;
+                double t_n_coeff;
+                Vector t_Tangent;
+
+                if (dot(r.u, N)>0) {
+                    std::swap(n1,n2);
+                    Nt = -1* Nt;
+                }
+                t_Tangent = n1 / n2 * (r.u - dot(r.u, Nt) * Nt);
+                //t_n_coeff = 1 - sqrt(1 - sqr(n1/n2) * ( 1- sqr(dot(r.u, Nt))));
+                double rad = 1 - sqr(n1/n2)* (1-sqr(dot(r.u, Nt)));
+
+                if (rad < 0) {
+                    Vector ref_dir = r.u - 2*dot(r.u, N)*N;
+                    ref_dir.normalize();
+                    Ray mirrorR = Ray(P + 0.001*N, ref_dir);
+                    return getColor(mirrorR, bounce_number-1);
+                }
+
+                t_n_coeff = -sqrt(rad);
+                Vector ray_dir = t_n_coeff * Nt + t_Tangent;
+                ray_dir.normalize();
+                Ray refraction(P-0.001*Nt, ray_dir);
+                return getColor(refraction, bounce_number - 1);
+            }
+
+            Vector lightDir = L - P;
+            double d2 = lightDir.norm2();
+            lightDir.normalize();
+            
+            Vector color = I/(4 * M_PI * d2) * hit_obj->alb / M_PI * std::max(0., dot(lightDir, N));
+
+            // Checking for if the point is in the shadow
+            Ray shadow_ray(P + 0.001*N, lightDir);
+            double shadowt;
+            Vector shadowP, shadowN;
+            Geometry* empty = nullptr;
+            bool in_shadow = intersect(shadow_ray, shadowP, shadowN, shadowt, empty);
+            bool condition = ((shadowP - P).norm2() <= d2);
+            bool both = (in_shadow && condition);
+            if (both) {
+                color = Vector(0,0,0);
+            }
+
+            if (!direct_lighting) {
+
+                // Adding a random indirect light ray
+                Vector random_dir = random_lightDir(N);
+                random_dir.normalize();
+                Ray bounce_ray = Ray(P + 0.0001*random_dir, random_dir);
+                Vector new_color = hit_obj->alb * getColor(bounce_ray, bounce_number-1);
+                color = color + new_color;
+            }
+
+            return color;
+            }
+
+        ~Scene() {
+            for (auto obj : objects) {
+                delete obj;
+            }
+        }
+
+};
+/*
+class BoundingBox { // this is supposed to speed it up
+    public:
+    BoundingBox(const Vector& m = Vector(0,0,0), const Vector & M = Vector(0,0,0)) : m(m), M(M) {};
+
+    bool intersect(const Ray& r) { // checks if theres an intersection with a ray and the bounding box
+        // check this in some intersect function
+
+        double tx1 = (m[0] - r.O[0]/r.u[0]);
+        double tx2 = (M[0] - r.O[0]/r.u[0]);
+        double txMin = std::min(tx1, tx2);
+        double txMax = std::max(tx1, tx2);
+
+        double ty1 = (m[1] - r.O[1]/r.u[1]);
+        double ty2 = (M[1] - r.O[1]/r.u[1]);
+        double tyMin = std::min(ty1, ty2);
+        double tyMax = std::max(ty1, ty2);
+
+        double tz1 = (m[2] - r.O[2]/r.u[2]);
+        double tz2 = (M[2] - r.O[2]/r.u[2]);
+        double tzMin = std::min(tz1, tz2);
+        double tzMax = std::max(tz1, tz2);
+
+        //intersect if
+        if (std::min(txMax, std::min(tyMax, tzMax)) > std::max(txMin, std::max(tyMin, tzMin))) {
+            return true;
+        }
+        return false;
+
+
+    }
+    Vector m, M; //min and max
+};
+*/
+
 /*
 class TriangleMesh {
     public:
@@ -524,42 +586,46 @@ int main() {
     int W = 512;
     int H = 512;
 
+    // Defining camera properties
     Vector camera_origin(0, 0, 55); //camera placement
     double fov = 60 * M_PI / 180; //field of view
             
     Scene this_scene;
+
+    //this_scene.objects.push_back(new Sphere(Vector(20,0,0), 10, Vector(1,1,1), false, true));
+    //Sphere k(Vector(0,0,0), 10, Vector(0.4,0.7,0.2), false, false);
+    //this_scene.add(k);
+    //Sphere h(Vector(-20,0,0), 10, Vector(1,0.2,0.8), false, false);
+    //this_scene.add(h);
+
+    // Adding walls and floor/ceiling
+    this_scene.objects.push_back(new Sphere(Vector(-1000, 0, 0), 940, Vector(0.5, 0.8, 0.1), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(1000, 0, 0), 940, Vector(0.9, 0.2, 0.3), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, 1000, 0), 940, Vector(0.3, 0.5, 0.3), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, -1000, 0), 990, Vector(0.6, 0.5, 0.7), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, 0, -1000), 940, Vector(0.1, 0.6, 0.17), false, false));
+    this_scene.objects.push_back(new Sphere(Vector(0, 0, 1000), 940, Vector(0.8, 0.2, 0.9), false, false));
+    
+    // Adding cat to scene
+    TriangleMesh* mesh = new TriangleMesh();
+	mesh->readOBJ("cat.obj");
+    std::cout << "vertices: " << mesh->vertices.size() << ", normals: " << mesh->normals.size() << ", triangles: " << mesh->indices.size() << std::endl;
+	mesh->alb = Vector(1,1,1);
+	mesh->scale(0.6, Vector(0,-10,0));
+    mesh->mirror = false;
+    mesh->smooth = true;
+    mesh->transparent = false;
+    this_scene.objects.push_back(mesh);
+
+    // Defining scene lighting
     this_scene.L = Vector(-10,20,40);
-    this_scene.I = 1e8;
-    Sphere S(Vector(20,0,0), 10, Vector(1,1,1), true, false);
-    this_scene.add(S);
-    Sphere k(Vector(0,0,0), 10, Vector(0.4,0.7,0.2), false, false);
-    this_scene.add(k);
-    Sphere h(Vector(-20,0,0), 10, Vector(1,0.2,0.8), false, false);
-    this_scene.add(h);
-
-    //TriangleMesh mesh;
-    //scene.add(&mesh);
-
-    Sphere left(Vector(-1000, 0, 0), 940, Vector(0.5, 0.8, 0.1), false, false);
-    Sphere right(Vector(1000, 0, 0), 940, Vector(0.9, 0.2, 0.3), false, false);
-    Sphere top(Vector(0, 1000, 0), 940, Vector(0.3, 0.5, 0.3), false, false);
-    Sphere bottom(Vector(0, -1000, 0), 990, Vector(0.6, 0.5, 0.7), false, false);
-    Sphere front(Vector(0, 0, -1000), 940, Vector(0.1, 0.6, 0.17), false, false);
-    Sphere backwall(Vector(0, 0, 1000), 940, Vector(0.8, 0.2, 0.9), false, false);
-
-    this_scene.add(left);
-    this_scene.add(right);
-    this_scene.add(top);
-    this_scene.add(bottom);
-    this_scene.add(front);
-    this_scene.add(backwall);
-
-    this_scene.direct_lighting = false;
-    bool antialiasing = true;
-    int alias_rays = 64;
+    this_scene.I = 1e10;
+    this_scene.direct_lighting = true;
+    bool antialiasing = false;
+    int alias_rays = 2;
+    int bounce_number = 5;
 
     std::vector<unsigned char> image(W * H * 3, 0);
-    int bounce_number = 5;
 
     // iterating through every pixel (i,j)
     #pragma omp parallel for schedule(dynamic,1)
@@ -600,10 +666,3 @@ int main() {
  
     return 0;
 }
-/*
-object class
-triangle mesh class inherits from object class, has intersect function
-
-
-
-*/
