@@ -149,6 +149,37 @@ class Sphere : public Geometry {
     }
 };
 
+class BoundingBox { // this is supposed to speed it up
+    public:
+    BoundingBox(const Vector& min = Vector(0,0,0), const Vector & max = Vector(0,0,0)) : min(min), max(max) {};
+
+    bool intersect(const Ray& r) {
+        // Checks if theres an intersection with a ray and the bounding box
+
+        double tx1 = (min[0] - r.O[0])/r.u[0];
+        double tx2 = (max[0] - r.O[0])/r.u[0];
+        double txMin = std::min(tx1, tx2);
+        double txMax = std::max(tx1, tx2);
+
+        double ty1 = (min[1] - r.O[1])/r.u[1];
+        double ty2 = (max[1] - r.O[1])/r.u[1];
+        double tyMin = std::min(ty1, ty2);
+        double tyMax = std::max(ty1, ty2);
+
+        double tz1 = (min[2] - r.O[2])/r.u[2];
+        double tz2 = (max[2] - r.O[2])/r.u[2];
+        double tzMin = std::min(tz1, tz2);
+        double tzMax = std::max(tz1, tz2);
+
+        //Intersects if
+        if (std::min(txMax, std::min(tyMax, tzMax)) > std::max(txMin, std::max(tyMin, tzMin))) {
+            return true;
+        }
+        return false;
+    }
+    Vector min, max;
+};
+
 class TriangleIndices {
     public:
         TriangleIndices(int vtxi = -1, int vtxj = -1, int vtxk = -1, int ni = -1, int nj = -1, int nk = -1, int uvi = -1, int uvj = -1, int uvk = -1, int group = -1, bool added = false) : vtxi(vtxi), vtxj(vtxj), vtxk(vtxk), uvi(uvi), uvj(uvj), uvk(uvk), ni(ni), nj(nj), nk(nk), group(group) {
@@ -351,6 +382,10 @@ class TriangleMesh : public Geometry {
 
             bool intersection = false;
 
+            if (!this->bounding_box.intersect(r)) {
+                return false;
+            }
+
             for (int i = 0; i < indices.size(); i++ ) {
 
                 // Getting vertex coordinates
@@ -388,11 +423,30 @@ class TriangleMesh : public Geometry {
             }
             return intersection;
         }
+
+        void compute_bbox() {
+            bounding_box.min = Vector(1E9, 1E9, 1E9); // Progressively try to improve these bounds (min and max)
+            bounding_box.max = Vector(-1E9,-1E9, -1E9);
+
+            for (int i = 0; i < vertices.size(); i++) {
+                for (int j = 0; j < 3; j++) {
+                    bounding_box.min[j] = std::min(bounding_box.min[j], vertices[i][j]);
+                    bounding_box.max[j] = std::max(bounding_box.max[j], vertices[i][j]);
+                }
+            }
+        }
+
+        void no_bbox() {
+            bounding_box.min = Vector(1E9, 1E9, 1E9);
+            bounding_box.max = Vector(-1E9,-1E9, -1E9);
+        }
+
         std::vector<TriangleIndices> indices;
         std::vector<Vector> vertices;
         std::vector<Vector> normals;
         std::vector<Vector> uvs;
         std::vector<Vector> vertexcolors;
+        BoundingBox bounding_box;
 };
 
  
@@ -504,7 +558,7 @@ class Scene {
                 random_dir.normalize();
                 Ray bounce_ray = Ray(P + 0.0001*random_dir, random_dir);
                 Vector new_color = hit_obj->alb * getColor(bounce_ray, bounce_number-1);
-                color = color + new_color;
+                color = (color + new_color) / 2;
             }
 
             return color;
@@ -517,69 +571,8 @@ class Scene {
         }
 
 };
-/*
-class BoundingBox { // this is supposed to speed it up
-    public:
-    BoundingBox(const Vector& m = Vector(0,0,0), const Vector & M = Vector(0,0,0)) : m(m), M(M) {};
-
-    bool intersect(const Ray& r) { // checks if theres an intersection with a ray and the bounding box
-        // check this in some intersect function
-
-        double tx1 = (m[0] - r.O[0]/r.u[0]);
-        double tx2 = (M[0] - r.O[0]/r.u[0]);
-        double txMin = std::min(tx1, tx2);
-        double txMax = std::max(tx1, tx2);
-
-        double ty1 = (m[1] - r.O[1]/r.u[1]);
-        double ty2 = (M[1] - r.O[1]/r.u[1]);
-        double tyMin = std::min(ty1, ty2);
-        double tyMax = std::max(ty1, ty2);
-
-        double tz1 = (m[2] - r.O[2]/r.u[2]);
-        double tz2 = (M[2] - r.O[2]/r.u[2]);
-        double tzMin = std::min(tz1, tz2);
-        double tzMax = std::max(tz1, tz2);
-
-        //intersect if
-        if (std::min(txMax, std::min(tyMax, tzMax)) > std::max(txMin, std::max(tyMin, tzMin))) {
-            return true;
-        }
-        return false;
 
 
-    }
-    Vector m, M; //min and max
-};
-*/
-
-/*
-class TriangleMesh {
-    public:
-      ~TriangleMesh() {}
-        TriangleMesh() {};
-        void compute_bbox() {
-            bounding_box.m = Vector(1E9, 1E9, 1E9); // progressively try to improve these bounds (min and max)
-            bounding_box.m = Vector(-1E9,-1E9, -1E9);
-
-            for (int i = 0; i < vertices.size(); i++) {
-
-                for (int j = 0; j < 3; j++) {
-                bounding_box.m[j] = std::min(bounding_box.m[j], vertices[i][j]);
-                bounding_box.M[j] = std::max(bounding_box.m[j], vertices[i][j]);
-
-
-                }
-            }
-        }
-    
-        std::vector<TriangleIndices> indices;
-        std::vector<Vector> vertices;
-        std::vector<Vector> normals;
-        std::vector<Vector> uvs;
-        std::vector<Vector> vertexcolors;
-        //BoundingBox bounding_box;
-    };
-*/
 
 
 int main() {
@@ -606,23 +599,28 @@ int main() {
     this_scene.objects.push_back(new Sphere(Vector(0, 0, -1000), 940, Vector(0.1, 0.6, 0.17), false, false));
     this_scene.objects.push_back(new Sphere(Vector(0, 0, 1000), 940, Vector(0.8, 0.2, 0.9), false, false));
     
-    // Adding cat to scene
+    // Adding cat mesh to scene
     TriangleMesh* mesh = new TriangleMesh();
 	mesh->readOBJ("cat.obj");
-    std::cout << "vertices: " << mesh->vertices.size() << ", normals: " << mesh->normals.size() << ", triangles: " << mesh->indices.size() << std::endl;
 	mesh->alb = Vector(1,1,1);
-	mesh->scale(0.6, Vector(0,-10,0));
     mesh->mirror = false;
     mesh->smooth = true;
     mesh->transparent = false;
+
+
+    // Bounding box
+    mesh->scale(0.6, Vector(0,-10,0));
+    mesh->compute_bbox();
+
     this_scene.objects.push_back(mesh);
+
 
     // Defining scene lighting
     this_scene.L = Vector(-10,20,40);
-    this_scene.I = 1e10;
-    this_scene.direct_lighting = true;
-    bool antialiasing = false;
-    int alias_rays = 2;
+    this_scene.I = 8e10;
+    this_scene.direct_lighting = false;
+    bool antialiasing = true;
+    int alias_rays = 16;
     int bounce_number = 5;
 
     std::vector<unsigned char> image(W * H * 3, 0);
